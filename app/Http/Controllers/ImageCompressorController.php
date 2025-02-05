@@ -15,79 +15,88 @@ class ImageCompressorController extends Controller
         return Inertia::render('ImageCompressor');
     }
 
-    public function compress(Request $request)
+    public function compressSingle(Request $request)
     {
         $request->validate([
-            'images' => 'required|array',
-            'images.*' => 'required|image|max:10240', // Max 10MB per image
+            'image' => 'required|image|max:10240', // Max 10MB
             'quality' => 'required|integer|min:1|max:100',
         ]);
 
-        $images = $request->file('images');
+        $image = $request->file('image');
         $quality = $request->input('quality');
         $manager = ImageManager::imagick();
 
-        // Create a unique directory for this batch
-        $batchId = uniqid();
-        $tempDir = storage_path('app/public/temp/' . $batchId);
-        $zipPath = storage_path('app/public/temp/' . $batchId . '.zip');
+        // Create a unique name for this image
+        $originalName = pathinfo($image->getClientOriginalName(), PATHINFO_FILENAME);
+        $uniqueName = uniqid() . '_' . $originalName;
+        $tempPath = storage_path('app/public/temp/' . $uniqueName . '.jpg');
 
         // Ensure the directory exists
-        if (!file_exists($tempDir)) {
-            mkdir($tempDir, 0755, true);
+        if (!file_exists(dirname($tempPath))) {
+            mkdir(dirname($tempPath), 0755, true);
         }
 
-        $compressedSizes = [];
-        $compressedFiles = [];
+        // Create intervention image instance and compress
+        $img = $manager->read($image);
+        $img->save($tempPath, $quality);
 
-        // Process each image
-        foreach ($images as $image) {
-            $originalName = pathinfo($image->getClientOriginalName(), PATHINFO_FILENAME);
-            $tempPath = $tempDir . '/' . $originalName . '_compressed.jpg';
+        // Schedule cleanup for this single file
+        $this->scheduleCleanup(null, $tempPath);
 
-            // Create intervention image instance and compress
-            $img = $manager->read($image);
-            $img->save($tempPath, $quality);
+        return response()->json([
+            'compressedSize' => filesize($tempPath),
+            'compressedPath' => $tempPath
+        ]);
+    }
 
-            $compressedSizes[] = filesize($tempPath);
-            $compressedFiles[] = $tempPath;
+    public function createZip(Request $request)
+    {
+        $request->validate([
+            'processedImages' => 'required|string',
+        ]);
+
+        $processedImages = json_decode($request->input('processedImages'), true);
+
+        if (empty($processedImages)) {
+            return response()->json(['error' => 'No images to compress'], 400);
         }
+
+        // Create a unique ZIP file
+        $batchId = uniqid();
+        $zipPath = storage_path('app/public/temp/' . $batchId . '.zip');
 
         // Create ZIP file
         $zip = new \ZipArchive();
         if ($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) === TRUE) {
-            foreach ($compressedFiles as $file) {
-                $zip->addFile($file, basename($file));
+            foreach ($processedImages as $file) {
+                if (file_exists($file)) {
+                    $zip->addFile($file, basename($file));
+                }
             }
             $zip->close();
         }
 
-        // Schedule cleanup
-        $this->scheduleCleanup($tempDir, $zipPath);
+        // Schedule cleanup for the ZIP file
+        $this->scheduleCleanup(null, $zipPath);
 
-        return Inertia::render('ImageCompressor', [
-            'flash' => [
-                'compressedSizes' => $compressedSizes,
-                'zipUrl' => asset('storage/temp/' . $batchId . '.zip')
-            ]
+        return response()->json([
+            'zipUrl' => asset('storage/temp/' . $batchId . '.zip')
         ]);
     }
 
-    private function scheduleCleanup($tempDir, $zipPath)
+
+    private function scheduleCleanup($tempDir = null, $filePath = null)
     {
         // Schedule cleanup after 1 hour
-        dispatch(function () use ($tempDir, $zipPath) {
-            // Delete temporary directory and its contents
-            if (is_dir($tempDir)) {
+        dispatch(function () use ($tempDir, $filePath) {
+            if ($tempDir && is_dir($tempDir)) {
                 array_map('unlink', glob("$tempDir/*.*"));
                 rmdir($tempDir);
             }
 
-            // Delete ZIP file
-            if (file_exists($zipPath)) {
-                unlink($zipPath);
+            if ($filePath && file_exists($filePath)) {
+                unlink($filePath);
             }
         })->delay(now()->addHour());
     }
-    
 }

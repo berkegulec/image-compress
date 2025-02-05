@@ -21,32 +21,65 @@ export default function ImageCompressor() {
         setDownloadUrl(null);
     };
 
-    const handleCompress = () => {
-        if (images.length === 0) return;
+    const processNextImage = async (currentIndex, processedImages = []) => {
+        if (currentIndex >= images.length) {
+            // All images processed, create ZIP
+            const formData = new FormData();
+            formData.append('processedImages', JSON.stringify(processedImages));
+            
+            try {
+                const response = await fetch('/create-zip', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                    },
+                    body: formData
+                });
+                const data = await response.json();
+                setDownloadUrl(data.zipUrl);
+            } catch (error) {
+                console.error('Error creating ZIP:', error);
+            }
+            
+            setLoading(false);
+            return;
+        }
 
         const formData = new FormData();
-        images.forEach((img, index) => {
-            formData.append(`images[]`, img.file);
-        });
+        formData.append('image', images[currentIndex].file);
         formData.append('quality', quality);
-        setLoading(true);
 
-        router.post('/compress', formData, {
-            onSuccess: (page) => {
-                const { flash = {} } = page.props;
-                if (flash.compressedSizes && flash.zipUrl) {
-                    setImages(prev => prev.map((img, index) => ({
-                        ...img,
-                        compressedSize: flash.compressedSizes[index]
-                    })));
-                    setDownloadUrl(flash.zipUrl);
-                }
-                setLoading(false);
-            },
-            onError: () => {
-                setLoading(false);
-            },
-        });
+        try {
+            const response = await fetch('/compress-single', {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+                },
+                body: formData
+            });
+
+            const data = await response.json();
+            
+            setImages(prev => prev.map((img, index) => 
+                index === currentIndex ? {
+                    ...img,
+                    compressedSize: data.compressedSize,
+                    compressedPath: data.compressedPath
+                } : img
+            ));
+
+            processedImages.push(data.compressedPath);
+            processNextImage(currentIndex + 1, processedImages);
+        } catch (error) {
+            console.error(`Error processing image ${currentIndex}:`, error);
+            setLoading(false);
+        }
+    };
+
+    const handleCompress = () => {
+        if (images.length === 0) return;
+        setLoading(true);
+        processNextImage(0);
     };
 
     const handleRemoveImage = (id) => {

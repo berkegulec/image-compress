@@ -7,7 +7,8 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::get('/', [ImageCompressorController::class, 'index']);
-Route::post('/compress', [ImageCompressorController::class, 'compress']);
+Route::post('/compress-single', [ImageCompressorController::class, 'compressSingle']);
+Route::post('/create-zip', [ImageCompressorController::class, 'createZip']);
 
 Route::get('/dashboard', function () {
     return Inertia::render('Dashboard');

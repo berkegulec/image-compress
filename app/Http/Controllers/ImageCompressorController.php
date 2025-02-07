@@ -6,7 +6,10 @@ use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
-use Intervention\Image\ImageManager;
+use Spatie\Image\Enums\ImageDriver;
+use Spatie\Image\Image;
+use Spatie\ImageOptimizer\OptimizerChain;
+use Spatie\ImageOptimizer\Optimizers\Jpegoptim;
 
 class ImageCompressorController extends Controller
 {
@@ -24,11 +27,10 @@ class ImageCompressorController extends Controller
 
         $image = $request->file('image');
         $quality = $request->input('quality');
-        $manager = ImageManager::gd();
 
         // Create a unique name for this image
         $originalName = pathinfo($image->getClientOriginalName(), PATHINFO_FILENAME);
-        $uniqueName = uniqid() . '_' . $originalName;
+        $uniqueName = $originalName . '-min';
         $tempPath = storage_path('app/public/temp/' . $uniqueName . '.jpg');
 
         // Ensure the directory exists
@@ -36,9 +38,14 @@ class ImageCompressorController extends Controller
             mkdir(dirname($tempPath), 0755, true);
         }
 
+
+
         // Create intervention image instance and compress
-        $img = $manager->read($image);
-        $img->save($tempPath, quality: (int)$quality);
+        $img = Image::useImageDriver(ImageDriver::Gd)
+            ->loadFile($image)
+            ->quality($quality)
+            ->optimize()
+            ->save($tempPath);
 
         // Schedule cleanup for this single file
         $this->scheduleCleanup(null, $tempPath);

@@ -18,13 +18,13 @@ class ImageCompressorController extends Controller
     public function compressSingle(Request $request)
     {
         $request->validate([
-            'image' => 'required|image|max:10240', // Max 10MB
+            'image' => 'required|image', // Max 10MB
             'quality' => 'required|integer|min:1|max:100',
         ]);
 
         $image = $request->file('image');
         $quality = $request->input('quality');
-        $manager = ImageManager::imagick();
+        $manager = ImageManager::gd();
 
         // Create a unique name for this image
         $originalName = pathinfo($image->getClientOriginalName(), PATHINFO_FILENAME);
@@ -38,7 +38,7 @@ class ImageCompressorController extends Controller
 
         // Create intervention image instance and compress
         $img = $manager->read($image);
-        $img->save($tempPath, $quality);
+        $img->save($tempPath, quality: (int)$quality);
 
         // Schedule cleanup for this single file
         $this->scheduleCleanup(null, $tempPath);
